@@ -91,7 +91,7 @@ async function endGiveaway(giveawayId) {
     // حفظ القيفاوي المنتهي
     const { error } = await supabase.from('ended_giveaways').insert([{
       ...giveaway,
-      endedAt: Date.now(),
+      endedAt: new Date().toISOString(),   // ✅ يخزن كـ timestamp
       winners_list: winners
     }]);
     if (error) console.error('Error saving ended giveaway:', error);
@@ -150,7 +150,7 @@ client.once('ready', async () => {
   setInterval(() => {
     const now = Date.now();
     for (const [giveawayId, giveaway] of Object.entries(giveaways)) {
-      if (now >= giveaway.endTime) {
+      if (now >= new Date(giveaway.endtime).getTime()) {  // ✅ تحويل timestamp → ms
         endGiveaway(giveawayId);
       }
     }
@@ -184,13 +184,13 @@ client.on('messageCreate', async (message) => {
     message.delete().catch(() => {});
 
     const giveawayId = Date.now().toString();
-    const endTime = Date.now() + duration;
+    const endTime = new Date(Date.now() + duration).toISOString(); // ✅ يخزن timestamp
 
     const embed = new EmbedBuilder()
       .setTitle(`${prize}`)
       .setColor('#FFFF00')
       .setDescription(`🔔 React with 🎉 to enter !
-⚙️ Ending: <t:${Math.floor(endTime / 1000)}:R>
+⚙️ Ending: <t:${Math.floor((Date.now() + duration) / 1000)}:R>
 ↕️ Hosted by: <@${message.author.id}>`)
       .setFooter({ text: `🏆 Winners: ${winnersCount}` });
 
@@ -206,7 +206,7 @@ client.on('messageCreate', async (message) => {
       hostId: message.author.id,
       prize,
       winners: winnersCount,
-      endTime,
+      endtime: endTime,               // ✅ timestamp
       participants: []
     };
     await saveGiveaway(giveaways[giveawayId]);
@@ -234,7 +234,7 @@ client.on('messageCreate', async (message) => {
       .setTimestamp();
 
     active.forEach((g, i) => {
-      const timeLeft = formatTimeLeft(g.endTime - Date.now());
+      const timeLeft = formatTimeLeft(new Date(g.endtime).getTime() - Date.now()); // ✅ تحويل timestamp
       embed.addFields({
         name: `${i + 1}. ${g.prize}`,
         value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
@@ -249,7 +249,7 @@ client.on('messageCreate', async (message) => {
     if (args.length === 0) return message.reply('❌ Usage: `!greroll <message_id>`');
 
     const messageId = args[0];
-    const { data, error } = await supabase.from('ended_giveaways').select('*').eq('messageId', messageId);
+    const { data, error } = await supabase.from('ended_giveaways').select('*').eq('messageid', messageId);
     if (error || !data || data.length === 0) return message.reply('❌ No ended giveaway found');
 
     const giveaway = data[0];
