@@ -249,7 +249,7 @@ client.on('messageCreate', async (message) => {
     if (args.length === 0) return message.reply('❌ Usage: `!greroll <message_id>`');
 
     const messageId = args[0];
-    const { data, error } = await supabase.from('ended_giveaways').select('*').eq('messageid', messageId);
+    const { data, error } = await supabase.from('ended_giveaways').select('*').eq('messageId', messageId);
     if (error || !data || data.length === 0) return message.reply('❌ No ended giveaway found');
 
     const giveaway = data[0];
