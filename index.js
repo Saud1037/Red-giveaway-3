@@ -165,8 +165,8 @@ client.on('messageCreate', async (message) => {
   const command = args.shift().toLowerCase();
 
   if (command === 'gstart') {
-    if (!message.member.permissions.has('ManageGuild')) {
-      return message.reply('❌ You need Manage Server permission to use this command');
+    if (!message.member.permissions.has('ManageEvents')) {
+      return message.reply('❌ You need Manage Events permission to use this command');
     }
 
     if (args.length < 3) {
@@ -241,7 +241,7 @@ else if (command === 'help') {
 }
 
   else if (command === 'gend') {
-    if (!message.member.permissions.has('ManageGuild')) return message.reply('❌ Permission needed');
+    if (!message.member.permissions.has('ManageEvents')) return message.reply('❌ Permission needed');
     if (args.length === 0) return message.reply('❌ Usage: `!gend <message_id>`');
 
     const messageId = args[0];
@@ -273,7 +273,7 @@ else if (command === 'help') {
   }
 
   else if (command === 'greroll') {
-    if (!message.member.permissions.has('ManageGuild')) return message.reply('❌ Permission needed');
+    if (!message.member.permissions.has('ManageEvents')) return message.reply('❌ Permission needed');
     if (args.length === 0) return message.reply('❌ Usage: `!greroll <message_id>`');
 
     const messageId = args[0];
