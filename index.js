@@ -212,6 +212,34 @@ client.on('messageCreate', async (message) => {
     await saveGiveaway(giveaways[giveawayId]);
   }
 
+else if (command === 'help') {
+  const helpEmbed = new EmbedBuilder()
+    .setTitle('🎉 Giveaway Bot - Commands')
+    .setColor('#FF0000') // أحمر
+    .setDescription('All available giveaway bot commands:')
+    .addFields(
+      {
+        name: '🚀 !gstart `<time>` `<winners_count>` `<prize>`',
+        value: `Start a new giveaway\nExample: \`!gstart 1h 2 Discord Nitro\`\nTime formats: s=seconds, m=minutes, h=hours, d=days`,
+      },
+      {
+        name: '🗑️ !gend `<message_id>`',
+        value: `End a giveaway manually\nExample: \`!gend 1234567890123456789\``,
+      },
+      {
+        name: '📋 !glist',
+        value: `Show list of active giveaways in the server`,
+      },
+      {
+        name: '🔄 !greroll `<message_id>`',
+        value: `Reroll winners for a giveaway\nExample: \`!greroll 1234567890123456789\``,
+      }
+    )
+    .setFooter({ text: `Made with ❤️ for the community | ${new Date().toLocaleDateString()}` });
+
+  message.reply({ embeds: [helpEmbed] });
+}
+
   else if (command === 'gend') {
     if (!message.member.permissions.has('ManageGuild')) return message.reply('❌ Permission needed');
     if (args.length === 0) return message.reply('❌ Usage: `!gend <message_id>`');
