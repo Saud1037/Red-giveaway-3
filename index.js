@@ -252,66 +252,68 @@ else if (command === 'help') {
     message.reply('✅ Giveaway ended successfully!');
   }
 
-  const { EmbedBuilder } = require("discord.js");
+  else if (command === 'glist') {
+  const pageSize = 10; // عدد القيفاويات لكل صفحة
+  const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
 
-function formatTimeLeft(ms) {
-  if (ms <= 0) return "Ended";
-  const seconds = Math.floor(ms / 1000) % 60;
-  const minutes = Math.floor(ms / (1000 * 60)) % 60;
-  const hours = Math.floor(ms / (1000 * 60 * 60)) % 24;
-  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
-}
+  // القيفاويات النشطة من نفس السيرفر
+  const active = Object.values(giveaways).filter(
+    g => g.guildId === message.guild.id && !g.ended
+  );
 
-module.exports = {
-  name: "glist",
-  description: "Show active giveaways (paginated)",
-
-  async execute(message, args, client) {
-    const pageSize = 10; // عدد القيفاويات لكل صفحة
-    const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
-
-    // نجلب القيفاويات النشطة من الذاكرة
-    const active = Object.values(client.giveaways).filter(
-      g => g.guildId === message.guild.id && !g.ended
-    );
-
-    if (active.length === 0) {
-      return message.reply("📋 No active giveaways currently");
-    }
-
-    const totalPages = Math.ceil(active.length / pageSize);
-    if (page < 1 || page > totalPages) {
-      return message.reply(`❌ Invalid page. Please choose between 1 and ${totalPages}`);
-    }
-
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    const giveawaysPage = active.slice(startIndex, endIndex);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
-      .setColor("Red") // حسب طلبك اللون الأحمر
-      .setTimestamp();
-
-    giveawaysPage.forEach((g, i) => {
-      const timeLeft = formatTimeLeft(g.endTime - Date.now());
-      embed.addFields({
-        name: `${startIndex + i + 1}. ${g.prize}`,
-        value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
-        inline: false
-      });
-    });
-
-    let footerText = `Page ${page}/${totalPages}`;
-    if (page < totalPages) {
-      footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
-    }
-    embed.setFooter({ text: footerText });
-
-    return message.reply({ embeds: [embed] });
+  if (active.length === 0) {
+    return message.reply('📋 No active giveaways currently');
   }
-};
+
+  const totalPages = Math.ceil(active.length / pageSize);
+  if (page < 1 || page > totalPages) {
+    return message.reply(`❌ Invalid page. Please choose between 1 and ${totalPages}`);
+  }
+
+  const startIndex = (page - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const giveawaysPage = active.slice(startIndex, endIndex);
+
+  // دالة لحساب الوقت المتبقي
+  function formatTimeLeft(ms) {
+    if (ms <= 0) return "Ended";
+    const seconds = Math.floor(ms / 1000) % 60;
+    const minutes = Math.floor(ms / (1000 * 60)) % 60;
+    const hours = Math.floor(ms / (1000 * 60 * 60)) % 24;
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  }
+
+  // تجهيز الامبيد
+  const embed = new EmbedBuilder()
+    .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
+    .setColor('Red')
+    .setTimestamp();
+
+  giveawaysPage.forEach((g, i) => {
+    // هنا نتاكد ان endTime مخزن كـ milliseconds
+    const endTime = typeof g.endTime === "string" || g.endTime instanceof Date
+      ? new Date(g.endTime).getTime()
+      : g.endTime;
+
+    const timeLeft = formatTimeLeft(endTime - Date.now());
+
+    embed.addFields({
+      name: `${startIndex + i + 1}. ${g.prize}`,
+      value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
+      inline: false
+    });
+  });
+
+  // Footer فيه أمر الصفحة التالية
+  let footerText = `Page ${page}/${totalPages}`;
+  if (page < totalPages) {
+    footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
+  }
+  embed.setFooter({ text: footerText });
+
+  message.reply({ embeds: [embed] });
+}
 
   else if (command === 'greroll') {
     if (!message.member.permissions.has('ManageEvents')) return message.reply('❌ Permission needed');
