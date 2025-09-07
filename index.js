@@ -253,17 +253,11 @@ else if (command === 'help') {
   }
 
   else if (command === 'glist') {
-  const pageSize = 10; // عدد القيفاويات لكل صفحة
-  const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
+  const pageSize = 10;
+  const page = parseInt(args[0]) || 1;
 
-  // القيفاويات النشطة من نفس السيرفر
-  const active = Object.values(giveaways).filter(
-    g => g.guildId === message.guild.id && !g.ended
-  );
-
-  if (active.length === 0) {
-    return message.reply('📋 No active giveaways currently');
-  }
+  const active = Object.values(giveaways).filter(g => g.guildId === message.guild.id);
+  if (active.length === 0) return message.reply('📋 No active giveaways currently');
 
   const totalPages = Math.ceil(active.length / pageSize);
   if (page < 1 || page > totalPages) {
@@ -274,9 +268,8 @@ else if (command === 'help') {
   const endIndex = startIndex + pageSize;
   const giveawaysPage = active.slice(startIndex, endIndex);
 
-  // دالة لحساب الوقت المتبقي
   function formatTimeLeft(ms) {
-    if (ms <= 0) return "Ended";
+    if (isNaN(ms) || ms <= 0) return "Ended";
     const seconds = Math.floor(ms / 1000) % 60;
     const minutes = Math.floor(ms / (1000 * 60)) % 60;
     const hours = Math.floor(ms / (1000 * 60 * 60)) % 24;
@@ -284,17 +277,19 @@ else if (command === 'help') {
     return `${days}d ${hours}h ${minutes}m ${seconds}s`;
   }
 
-  // تجهيز الامبيد
   const embed = new EmbedBuilder()
     .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
     .setColor('Red')
     .setTimestamp();
 
   giveawaysPage.forEach((g, i) => {
-    // هنا نتاكد ان endTime مخزن كـ milliseconds
-    const endTime = typeof g.endTime === "string" || g.endTime instanceof Date
-      ? new Date(g.endTime).getTime()
-      : g.endTime;
+    // نحول endTime دايمًا إلى رقم
+    let endTime = g.endTime;
+    if (typeof endTime === "string") {
+      endTime = new Date(endTime).getTime();
+    } else if (endTime instanceof Date) {
+      endTime = endTime.getTime();
+    }
 
     const timeLeft = formatTimeLeft(endTime - Date.now());
 
@@ -305,7 +300,6 @@ else if (command === 'help') {
     });
   });
 
-  // Footer فيه أمر الصفحة التالية
   let footerText = `Page ${page}/${totalPages}`;
   if (page < totalPages) {
     footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
