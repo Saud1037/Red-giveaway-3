@@ -9,16 +9,49 @@ const client = new Client({
     IntentsBitField.Flags.Guilds,
     IntentsBitField.Flags.GuildMessages,
     IntentsBitField.Flags.MessageContent,
-    IntentsBitField.Flags.GuildMessageReactions
+    IntentsBitField.Flags.GuildMessageReactions,
+    IntentsBitField.Flags.GuildMembers // ✅ إضافة intent للترحيب
   ]
 });
 
 // إعداد Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// متغير لحفظ القيفاويات النشطة
+// متغيرات لحفظ البيانات
 let giveaways = {};
+let greetSettings = {}; // ✅ إعدادات الترحيب لكل سيرفر
 
+// ========== دوال الترحيب ==========
+// دالة لتطبيق المتغيرات في رسالة الترحيب
+function applyGreetVariables(message, member) {
+  return message
+    .replace(/\{user\}/g, `<@${member.id}>`)
+    .replace(/\{username\}/g, member.user.username)
+    .replace(/\{server\}/g, member.guild.name)
+    .replace(/\{membercount\}/g, member.guild.memberCount);
+}
+
+// دالة لتحويل الوقت من نص إلى ميلي ثانية (للحذف التلقائي)
+function parseDelayTime(timeString) {
+  const regex = /(\d+)([smh])/g;
+  let totalMs = 0;
+  let match;
+
+  while ((match = regex.exec(timeString)) !== null) {
+    const value = parseInt(match[1]);
+    const unit = match[2];
+
+    switch (unit) {
+      case 's': totalMs += value * 1000; break;
+      case 'm': totalMs += value * 60 * 1000; break;
+      case 'h': totalMs += value * 60 * 60 * 1000; break;
+    }
+  }
+
+  return totalMs;
+}
+
+// ========== دوال القيفاوي ==========
 // تحميل القيفاويات من قاعدة البيانات
 async function loadGiveaways() {
   const { data, error } = await supabase.from('giveaways').select('*');
@@ -91,7 +124,7 @@ async function endGiveaway(giveawayId) {
     // حفظ القيفاوي المنتهي
     const { error } = await supabase.from('ended_giveaways').insert([{
       ...giveaway,
-      endedAt: new Date().toISOString(),   // ✅ يخزن كـ timestamp
+      endedAt: new Date().toISOString(),
       winners_list: winners
     }]);
     if (error) console.error('Error saving ended giveaway:', error);
@@ -142,6 +175,7 @@ function parseTime(timeString) {
   return totalMs;
 }
 
+// ========== أحداث البوت ==========
 // عند تشغيل البوت
 client.once('ready', async () => {
   console.log(`Bot is ready: ${client.user.tag}`);
@@ -150,11 +184,46 @@ client.once('ready', async () => {
   setInterval(() => {
     const now = Date.now();
     for (const [giveawayId, giveaway] of Object.entries(giveaways)) {
-      if (now >= new Date(giveaway.endtime).getTime()) {  // ✅ تحويل timestamp → ms
+      if (now >= new Date(giveaway.endtime).getTime()) {
         endGiveaway(giveawayId);
       }
     }
   }, 5000);
+});
+
+// ✅ event للترحيب عند انضمام عضو جديد
+client.on('guildMemberAdd', async (member) => {
+  const guildSettings = greetSettings[member.guild.id];
+  
+  // التحقق من وجود إعدادات الترحيب وأنها مفعلة
+  if (!guildSettings || !guildSettings.enabled || !guildSettings.channelId || !guildSettings.message) {
+    return;
+  }
+
+  try {
+    const channel = member.guild.channels.cache.get(guildSettings.channelId);
+    if (!channel || !channel.isTextBased()) return;
+
+    // تطبيق المتغيرات على الرسالة
+    const welcomeMessage = applyGreetVariables(guildSettings.message, member);
+
+    // إرسال رسالة الترحيب
+    const sentMessage = await channel.send(welcomeMessage);
+
+    // حذف الرسالة بعد الوقت المحدد
+    if (guildSettings.delAfter > 0) {
+      setTimeout(async () => {
+        try {
+          await sentMessage.delete();
+        } catch (error) {
+          console.log('Could not delete welcome message:', error.message);
+        }
+      }, guildSettings.delAfter);
+    }
+
+  } catch (error) {
+    console.error('Error sending welcome message:', error);
+  }
 });
 
 // معالجة الأوامر
@@ -164,6 +233,7 @@ client.on('messageCreate', async (message) => {
   const args = message.content.slice(1).trim().split(/ +/);
   const command = args.shift().toLowerCase();
 
+  // ========== أوامر القيفاوي ==========
   if (command === 'gstart') {
     if (!message.member.permissions.has('ManageEvents')) {
       return message.reply('❌ You need Manage Events permission to use this command');
@@ -184,7 +254,7 @@ client.on('messageCreate', async (message) => {
     message.delete().catch(() => {});
 
     const giveawayId = Date.now().toString();
-    const endTime = new Date(Date.now() + duration).toISOString(); // ✅ يخزن timestamp
+    const endTime = new Date(Date.now() + duration).toISOString();
 
     const embed = new EmbedBuilder()
       .setTitle(`${prize}`)
@@ -206,39 +276,11 @@ client.on('messageCreate', async (message) => {
       hostId: message.author.id,
       prize,
       winners: winnersCount,
-      endtime: endTime,               // ✅ timestamp
+      endtime: endTime,
       participants: []
     };
     await saveGiveaway(giveaways[giveawayId]);
   }
-
-else if (command === 'help') {
-  const helpEmbed = new EmbedBuilder()
-    .setTitle('🎉 Giveaway Bot - Commands')
-    .setColor('#FF0000') // أحمر
-    .setDescription('All available giveaway bot commands:')
-    .addFields(
-      {
-        name: '🚀 !gstart `<time>` `<winners_count>` `<prize>`',
-        value: `Start a new giveaway\nExample: \`!gstart 1h 2 Discord Nitro\`\nTime formats: s=seconds, m=minutes, h=hours, d=days`,
-      },
-      {
-        name: '🗑️ !gend `<message_id>`',
-        value: `End a giveaway manually\nExample: \`!gend 1234567890123456789\``,
-      },
-      {
-        name: '📋 !glist',
-        value: `Show list of active giveaways in the server`,
-      },
-      {
-        name: '🔄 !greroll `<message_id>`',
-        value: `Reroll winners for a giveaway\nExample: \`!greroll 1234567890123456789\``,
-      }
-    )
-    .setFooter({ text: `Made with ❤️ for the community | ${new Date().toLocaleDateString()}` });
-
-  message.reply({ embeds: [helpEmbed] });
-}
 
   else if (command === 'gend') {
     if (!message.member.permissions.has('ManageEvents')) return message.reply('❌ Permission needed');
@@ -252,50 +294,45 @@ else if (command === 'help') {
     message.reply('✅ Giveaway ended successfully!');
   }
 
- // الحل الأول: تعديل أمر glist فقط
-else if (command === 'glist') {
-  const pageSize = 10; // عدد القيفاويات لكل صفحة
-  const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
+  else if (command === 'glist') {
+    const pageSize = 10;
+    const page = parseInt(args[0]) || 1;
 
-  const active = Object.values(giveaways).filter(g => g.guildId === message.guild.id);
-  if (active.length === 0) return message.reply('📋 No active giveaways currently');
+    const active = Object.values(giveaways).filter(g => g.guildId === message.guild.id);
+    if (active.length === 0) return message.reply('📋 No active giveaways currently');
 
-  const totalPages = Math.ceil(active.length / pageSize);
-  if (page < 1 || page > totalPages) {
-    return message.reply(`❌ Invalid page. Please choose between 1 and ${totalPages}`);
-  }
+    const totalPages = Math.ceil(active.length / pageSize);
+    if (page < 1 || page > totalPages) {
+      return message.reply(`❌ Invalid page. Please choose between 1 and ${totalPages}`);
+    }
 
-  // حساب البداية والنهاية للصفحة الحالية
-  const startIndex = (page - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const giveawaysPage = active.slice(startIndex, endIndex);
+    const startIndex = (page - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const giveawaysPage = active.slice(startIndex, endIndex);
 
-  // تجهيز الامبيد
-  const embed = new EmbedBuilder()
-    .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
-    .setColor('#0099ff');
+    const embed = new EmbedBuilder()
+      .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
+      .setColor('#0099ff');
 
-  giveawaysPage.forEach((g, i) => {
-    // ✅ الإصلاح هنا - استخدام g.endtime بدلاً من g.endTime
-    const endTimeMs = new Date(g.endtime).getTime();
-    const timeLeft = formatTimeLeft(endTimeMs - Date.now());
-    
-    embed.addFields({
-      name: `${startIndex + i + 1}. ${g.prize}`,
-      value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
-      inline: false
+    giveawaysPage.forEach((g, i) => {
+      const endTimeMs = new Date(g.endtime).getTime();
+      const timeLeft = formatTimeLeft(endTimeMs - Date.now());
+      
+      embed.addFields({
+        name: `${startIndex + i + 1}. ${g.prize}`,
+        value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
+        inline: false
+      });
     });
-  });
 
-  // Footer فيه أمر الصفحة التالية
-  let footerText = `Page ${page}/${totalPages} | Today at ${new Date().toLocaleTimeString('en-US', { hour12: false })}`;
-  if (page < totalPages) {
-    footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
+    let footerText = `Page ${page}/${totalPages} | Today at ${new Date().toLocaleTimeString('en-US', { hour12: false })}`;
+    if (page < totalPages) {
+      footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
+    }
+    embed.setFooter({ text: footerText });
+
+    message.reply({ embeds: [embed] });
   }
-  embed.setFooter({ text: footerText });
-
-  message.reply({ embeds: [embed] });
-}
 
   else if (command === 'greroll') {
     if (!message.member.permissions.has('ManageEvents')) return message.reply('❌ Permission needed');
@@ -312,9 +349,174 @@ else if (command === 'glist') {
     const mentions = newWinners.map(id => `<@${id}>`).join(', ');
     message.channel.send(`🔄 Congratulations ${mentions}! You are the new winners of **${giveaway.prize}**!`);
   }
+
+  // ========== أوامر الترحيب ==========
+  else if (command === 'greet') {
+    if (!message.member.permissions.has('ManageGuild')) {
+      return message.reply('❌ You need Manage Server permission to use greet commands');
+    }
+
+    const subCommand = args[0]?.toLowerCase();
+    const guildId = message.guild.id;
+
+    // إنشاء إعدادات افتراضية إذا لم تكن موجودة
+    if (!greetSettings[guildId]) {
+      greetSettings[guildId] = {
+        enabled: false,
+        channelId: null,
+        message: 'Welcome {user} to **{server}**! 🎉\nWe now have {membercount} members!',
+        delAfter: 0
+      };
+    }
+
+    const settings = greetSettings[guildId];
+
+    if (subCommand === 'message') {
+      if (args.length < 2) {
+        return message.reply('❌ Usage: `!greet message <your welcome message>`\n\n**Available variables:**\n`{user}` - Mention the user\n`{username}` - User\'s name\n`{server}` - Server name\n`{membercount}` - Total members');
+      }
+
+      const newMessage = args.slice(1).join(' ');
+      settings.message = newMessage;
+      
+      const embed = new EmbedBuilder()
+        .setTitle('✅ Welcome Message Updated!')
+        .setDescription(`**New Message:**\n${applyGreetVariables(newMessage, message.member)}`)
+        .setColor('#00FF00');
+      
+      message.reply({ embeds: [embed] });
+    }
+
+    else if (subCommand === 'channel') {
+      settings.channelId = message.channel.id;
+      message.reply(`✅ Welcome channel set to ${message.channel}!`);
+    }
+
+    else if (subCommand === 'delafter') {
+      if (args.length < 2) {
+        return message.reply('❌ Usage: `!greet delafter <time>`\nExamples: `30s`, `5m`, `1h`, `0` (never delete)');
+      }
+
+      const timeArg = args[1];
+      if (timeArg === '0') {
+        settings.delAfter = 0;
+        return message.reply('✅ Welcome messages will not be auto-deleted!');
+      }
+
+      const delayMs = parseDelayTime(timeArg);
+      if (delayMs === 0) {
+        return message.reply('❌ Invalid time format! Use: `30s`, `5m`, `1h` or `0` for no deletion');
+      }
+
+      settings.delAfter = delayMs;
+      const delayText = timeArg.replace(/(\d+)([smh])/g, '$1$2');
+      message.reply(`✅ Welcome messages will be deleted after **${delayText}**!`);
+    }
+
+    else if (subCommand === 'toggle') {
+      settings.enabled = !settings.enabled;
+      const status = settings.enabled ? '✅ **ENABLED**' : '❌ **DISABLED**';
+      
+      const embed = new EmbedBuilder()
+        .setTitle('🔄 Welcome System Toggled')
+        .setDescription(`Welcome system is now ${status}`)
+        .setColor(settings.enabled ? '#00FF00' : '#FF0000');
+      
+      message.reply({ embeds: [embed] });
+    }
+
+    else if (subCommand === 'reset') {
+      greetSettings[guildId] = {
+        enabled: false,
+        channelId: null,
+        message: 'Welcome {user} to **{server}**! 🎉\nWe now have {membercount} members!',
+        delAfter: 0
+      };
+      
+      message.reply('✅ **Welcome system reset successfully!**\nAll settings have been restored to default.');
+    }
+
+    else if (subCommand === 'status') {
+      const channelMention = settings.channelId ? `<#${settings.channelId}>` : '❌ Not set';
+      const delAfterText = settings.delAfter > 0 ? 
+        `${Math.floor(settings.delAfter / 1000)}s` : '♾️ Never';
+      
+      const embed = new EmbedBuilder()
+        .setTitle('⚙️ Welcome System Status')
+        .setColor(settings.enabled ? '#00FF00' : '#FF0000')
+        .addFields(
+          { name: '🔘 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+          { name: '📝 Channel', value: channelMention, inline: true },
+          { name: '🗑️ Delete After', value: delAfterText, inline: true },
+          { name: '💬 Message Preview', value: applyGreetVariables(settings.message, message.member), inline: false }
+        )
+        .setFooter({ text: 'Use !greet <command> to modify settings' });
+      
+      message.reply({ embeds: [embed] });
+    }
+
+    else {
+      const embed = new EmbedBuilder()
+        .setTitle('🎉 Welcome System Commands')
+        .setColor('#0099FF')
+        .setDescription('Available greet commands:')
+        .addFields(
+          { name: '💬 !greet message `<text>`', value: 'Set the welcome message', inline: false },
+          { name: '📍 !greet channel', value: 'Set current channel for welcomes', inline: false },
+          { name: '⏰ !greet delafter `<time>`', value: 'Set auto-delete delay (30s, 5m, 1h, 0)', inline: false },
+          { name: '🔄 !greet toggle', value: 'Enable/disable welcome system', inline: false },
+          { name: '🗑️ !greet reset', value: 'Reset all welcome settings', inline: false },
+          { name: '📊 !greet status', value: 'Show current welcome settings', inline: false }
+        )
+        .setFooter({ text: 'Variables: {user} {username} {server} {membercount}' });
+      
+      message.reply({ embeds: [embed] });
+    }
+  }
+
+  // ========== أمر المساعدة ==========
+  else if (command === 'help') {
+    const helpEmbed = new EmbedBuilder()
+      .setTitle('🤖 Bot Commands - Help Center')
+      .setColor('#FF0000')
+      .setDescription('All available bot commands organized by category:')
+      .addFields(
+        {
+          name: '🎉 **GIVEAWAY COMMANDS**',
+          value: `**🚀 !gstart** \`<time>\` \`<winners>\` \`<prize>\` - Start giveaway
+**🗑️ !gend** \`<message_id>\` - End giveaway manually
+**📋 !glist** \`[page]\` - List active giveaways
+**🔄 !greroll** \`<message_id>\` - Reroll giveaway winners`,
+          inline: false
+        },
+        {
+          name: '👋 **WELCOME COMMANDS**',
+          value: `**💬 !greet message** \`<text>\` - Set welcome message
+**📍 !greet channel** - Set welcome channel (current)
+**⏰ !greet delafter** \`<time>\` - Auto-delete delay
+**🔄 !greet toggle** - Enable/disable welcomes
+**🗑️ !greet reset** - Reset welcome settings
+**📊 !greet status** - Show welcome config`,
+          inline: false
+        },
+        {
+          name: '📝 **WELCOME VARIABLES**',
+          value: '`{user}` = @mention • `{username}` = name • `{server}` = server name • `{membercount}` = member count',
+          inline: false
+        },
+        {
+          name: '⏰ **TIME FORMATS**',
+          value: '`s` = seconds • `m` = minutes • `h` = hours • `d` = days\nExample: `1h30m` = 1 hour 30 minutes',
+          inline: false
+        }
+      )
+      .setFooter({ text: `Made with ❤️ | Need help? Contact server admins` });
+
+    message.reply({ embeds: [helpEmbed] });
+  }
 });
 
-// تفاعل المستخدمين
+// تفاعل المستخدمين مع القيفاويات
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot || reaction.emoji.name !== '🎉') return;
   const giveawayId = Object.keys(giveaways).find(id => giveaways[id].messageId === reaction.message.id);
