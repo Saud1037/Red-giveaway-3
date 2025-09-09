@@ -252,7 +252,7 @@ else if (command === 'help') {
     message.reply('✅ Giveaway ended successfully!');
   }
 
-  // الحل الأول: تعديل أمر glist فقط
+ // الحل الأول: تعديل أمر glist فقط
 else if (command === 'glist') {
   const pageSize = 10; // عدد القيفاويات لكل صفحة
   const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
@@ -273,8 +273,7 @@ else if (command === 'glist') {
   // تجهيز الامبيد
   const embed = new EmbedBuilder()
     .setTitle(`📋 Active Giveaways (Page ${page}/${totalPages})`)
-    .setColor('#0099ff')
-    .setTimestamp();
+    .setColor('#0099ff');
 
   giveawaysPage.forEach((g, i) => {
     // ✅ الإصلاح هنا - استخدام g.endtime بدلاً من g.endTime
