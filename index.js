@@ -51,6 +51,22 @@ function parseDelayTime(timeString) {
   return totalMs;
 }
 
+// ✅ دالة لتنسيق الوقت للعرض
+function formatDelayTime(ms) {
+  if (ms === 0) return '♾️ Never';
+  
+  const hours = Math.floor(ms / (60 * 60 * 1000));
+  const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+  const seconds = Math.floor((ms % (60 * 1000)) / 1000);
+
+  let result = '';
+  if (hours > 0) result += `${hours}h `;
+  if (minutes > 0) result += `${minutes}m `;
+  if (seconds > 0) result += `${seconds}s`;
+
+  return result.trim() || '0s';
+}
+
 // ========== دوال القيفاوي ==========
 // تحميل القيفاويات من قاعدة البيانات
 async function loadGiveaways() {
@@ -436,23 +452,110 @@ client.on('messageCreate', async (message) => {
       message.reply('✅ **Welcome system reset successfully!**\nAll settings have been restored to default.');
     }
 
+    // ✅ تحديث أمر status
     else if (subCommand === 'status') {
       const channelMention = settings.channelId ? `<#${settings.channelId}>` : '❌ Not set';
-      const delAfterText = settings.delAfter > 0 ? 
-        `${Math.floor(settings.delAfter / 1000)}s` : '♾️ Never';
+      const statusIcon = settings.enabled ? '🟢' : '🔴';
+      const statusText = settings.enabled ? 'Enabled' : 'Disabled';
+      const delAfterText = formatDelayTime(settings.delAfter);
       
       const embed = new EmbedBuilder()
-        .setTitle('⚙️ Welcome System Status')
-        .setColor(settings.enabled ? '#00FF00' : '#FF0000')
+        .setTitle(`${statusIcon} Welcome System Status`)
+        .setColor(settings.enabled ? '#00FF00' : '#FF6B6B')
         .addFields(
-          { name: '🔘 Status', value: settings.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-          { name: '📝 Channel', value: channelMention, inline: true },
-          { name: '🗑️ Delete After', value: delAfterText, inline: true },
-          { name: '💬 Message Preview', value: applyGreetVariables(settings.message, message.member), inline: false }
+          { 
+            name: '⚙️ System Status', 
+            value: `${statusIcon} **${statusText}**`, 
+            inline: true 
+          },
+          { 
+            name: '📍 Welcome Channel', 
+            value: channelMention, 
+            inline: true 
+          },
+          { 
+            name: '⏰ Auto Delete', 
+            value: delAfterText, 
+            inline: true 
+          },
+          { 
+            name: '📝 Current Message', 
+            value: `\`\`\`${settings.message}\`\`\``, 
+            inline: false 
+          },
+          { 
+            name: '🎭 Message Preview', 
+            value: applyGreetVariables(settings.message, message.member), 
+            inline: false 
+          }
         )
-        .setFooter({ text: 'Use !greet <command> to modify settings' });
+        .setFooter({ 
+          text: `Server: ${message.guild.name} • Members: ${message.guild.memberCount}` 
+        })
+        .setTimestamp();
       
       message.reply({ embeds: [embed] });
+    }
+
+    // ✅ إضافة أمر test جديد
+    else if (subCommand === 'test') {
+      if (!settings.channelId) {
+        return message.reply('❌ **Welcome channel not set!**\nUse `!greet channel` first to set a welcome channel.');
+      }
+
+      if (!settings.message) {
+        return message.reply('❌ **Welcome message not set!**\nUse `!greet message <text>` to set a welcome message.');
+      }
+
+      try {
+        const channel = message.guild.channels.cache.get(settings.channelId);
+        if (!channel || !channel.isTextBased()) {
+          return message.reply('❌ **Welcome channel not found or invalid!**\nPlease set a new welcome channel.');
+        }
+
+        // تطبيق المتغيرات على الرسالة للاختبار
+        const testMessage = applyGreetVariables(settings.message, message.member);
+        
+        // إرسال رسالة تأكيد
+        const confirmEmbed = new EmbedBuilder()
+          .setTitle('🧪 Testing Welcome Message...')
+          .setDescription(`Sending test welcome message to ${channel}`)
+          .setColor('#FFA500');
+        
+        await message.reply({ embeds: [confirmEmbed] });
+
+        // إرسال رسالة الترحيب التجريبية
+        const testPrefix = '🧪 **[TEST MODE]** ';
+        const sentMessage = await channel.send(testPrefix + testMessage);
+
+        // حذف الرسالة بعد الوقت المحدد (إذا كان مُعيّن)
+        if (settings.delAfter > 0) {
+          setTimeout(async () => {
+            try {
+              await sentMessage.delete();
+              // إرسال إشعار بالحذف
+              const deleteNotification = await channel.send('🗑️ *Test welcome message deleted automatically*');
+              setTimeout(() => deleteNotification.delete().catch(() => {}), 3000);
+            } catch (error) {
+              console.log('Could not delete test welcome message:', error.message);
+            }
+          }, settings.delAfter);
+        }
+
+        // رسالة تأكيد النجاح
+        const successEmbed = new EmbedBuilder()
+          .setTitle('✅ Test Completed!')
+          .setDescription(`Test welcome message sent to ${channel}${settings.delAfter > 0 ? `\n⏰ Will be auto-deleted in ${formatDelayTime(settings.delAfter)}` : ''}`)
+          .setColor('#00FF00');
+        
+        setTimeout(() => {
+          message.channel.send({ embeds: [successEmbed] });
+        }, 1000);
+
+      } catch (error) {
+        console.error('Error testing welcome message:', error);
+        message.reply('❌ **Error testing welcome message!**\nPlease check the welcome channel settings.');
+      }
     }
 
     else {
@@ -465,8 +568,9 @@ client.on('messageCreate', async (message) => {
           { name: '📍 !greet channel', value: 'Set current channel for welcomes', inline: false },
           { name: '⏰ !greet delafter `<time>`', value: 'Set auto-delete delay (30s, 5m, 1h, 0)', inline: false },
           { name: '🔄 !greet toggle', value: 'Enable/disable welcome system', inline: false },
-          { name: '🗑️ !greet reset', value: 'Reset all welcome settings', inline: false },
-          { name: '📊 !greet status', value: 'Show current welcome settings', inline: false }
+          { name: '📊 !greet status', value: 'Show detailed welcome settings', inline: false },
+          { name: '🧪 !greet test', value: 'Test welcome message in current setup', inline: false },
+          { name: '🗑️ !greet reset', value: 'Reset all welcome settings', inline: false }
         )
         .setFooter({ text: 'Variables: {user} {username} {server} {membercount}' });
       
@@ -495,8 +599,9 @@ client.on('messageCreate', async (message) => {
 **📍 !greet channel** - Set welcome channel (current)
 **⏰ !greet delafter** \`<time>\` - Auto-delete delay
 **🔄 !greet toggle** - Enable/disable welcomes
-**🗑️ !greet reset** - Reset welcome settings
-**📊 !greet status** - Show welcome config`,
+**📊 !greet status** - Show detailed welcome config
+**🧪 !greet test** - Test welcome message
+**🗑️ !greet reset** - Reset welcome settings`,
           inline: false
         },
         {
