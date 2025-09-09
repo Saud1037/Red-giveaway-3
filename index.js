@@ -252,7 +252,8 @@ else if (command === 'help') {
     message.reply('✅ Giveaway ended successfully!');
   }
 
-  else if (command === 'glist') {
+  // الحل الأول: تعديل أمر glist فقط
+else if (command === 'glist') {
   const pageSize = 10; // عدد القيفاويات لكل صفحة
   const page = parseInt(args[0]) || 1; // الصفحة المطلوبة (افتراضي 1)
 
@@ -276,7 +277,10 @@ else if (command === 'help') {
     .setTimestamp();
 
   giveawaysPage.forEach((g, i) => {
-    const timeLeft = formatTimeLeft(g.endTime - Date.now());
+    // ✅ الإصلاح هنا - استخدام g.endtime بدلاً من g.endTime
+    const endTimeMs = new Date(g.endtime).getTime();
+    const timeLeft = formatTimeLeft(endTimeMs - Date.now());
+    
     embed.addFields({
       name: `${startIndex + i + 1}. ${g.prize}`,
       value: `**Winners:** ${g.winners}\n**Time Left:** ${timeLeft}\n**ID:** ${g.messageId}`,
@@ -285,7 +289,7 @@ else if (command === 'help') {
   });
 
   // Footer فيه أمر الصفحة التالية
-  let footerText = `Page ${page}/${totalPages}`;
+  let footerText = `Page ${page}/${totalPages} | Today at ${new Date().toLocaleTimeString('en-US', { hour12: false })}`;
   if (page < totalPages) {
     footerText = `Next page ➡ !glist ${page + 1} | ${footerText}`;
   }
