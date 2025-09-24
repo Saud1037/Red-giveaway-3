@@ -42,7 +42,12 @@ async function loadGreetSettings() {
   } else {
     greetSettings = {};
     data.forEach(s => {
-      greetSettings[s.guild_id] = s;
+      greetSettings[s.guild_id] = {
+        guild_id: s.guild_id,
+        channels: s.channels || [],
+        message: s.message || 'Welcome {mention} 🎉',
+        delete_time: s.delete_time || 0
+      };
     });
   }
 }
@@ -57,6 +62,20 @@ async function saveGiveaway(giveaway) {
 async function deleteGiveaway(id) {
   const { error } = await supabase.from('giveaways').delete().eq('id', id);
   if (error) console.error('Error deleting giveaway:', error);
+}
+
+// حفظ إعدادات الترحيب
+async function saveGreetSettings(guildId) {
+  const settings = greetSettings[guildId];
+  if (!settings) return;
+  
+  const { error } = await supabase.from('greet_settings').upsert({
+    guild_id: settings.guild_id,
+    channels: settings.channels,
+    message: settings.message,
+    delete_time: settings.delete_time
+  });
+  if (error) console.error('Error saving greet settings:', error);
 }
 
 // اختيار فائزين عشوائيين
@@ -149,6 +168,19 @@ function parseTime(timeString) {
   return totalMs;
 }
 
+// حذف رسالة الترحيب بعد وقت محدد
+function scheduleGreetMessageDeletion(message, deleteTime) {
+  if (deleteTime > 0) {
+    setTimeout(async () => {
+      try {
+        await message.delete();
+      } catch (error) {
+        console.error('Error deleting greet message:', error);
+      }
+    }, deleteTime);
+  }
+}
+
 // عند تشغيل البوت
 client.once('ready', async () => {
   console.log(`Bot is ready: ${client.user.tag}`);
@@ -168,16 +200,25 @@ client.once('ready', async () => {
 // رسالة ترحيب عند دخول عضو
 client.on('guildMemberAdd', async (member) => {
   const settings = greetSettings[member.guild.id];
-  if (!settings || !settings.channel_id || !settings.message) return;
-
-  const channel = member.guild.channels.cache.get(settings.channel_id);
-  if (!channel) return;
+  if (!settings || !settings.channels || settings.channels.length === 0 || !settings.message) return;
 
   const welcomeMessage = settings.message
     .replace(/{mention}/g, `<@${member.id}>`)
     .replace(/{username}/g, member.user.username);
 
-  channel.send(welcomeMessage);
+  // إرسال رسالة الترحيب لكل القنوات المحددة
+  for (const channelId of settings.channels) {
+    const channel = member.guild.channels.cache.get(channelId);
+    if (channel) {
+      try {
+        const sentMessage = await channel.send(welcomeMessage);
+        // جدولة حذف الرسالة إذا كان هناك وقت محدد
+        scheduleGreetMessageDeletion(sentMessage, settings.delete_time);
+      } catch (error) {
+        console.error('Error sending greet message:', error);
+      }
+    }
+  }
 });
 
 // أوامر
@@ -261,9 +302,11 @@ client.on('messageCreate', async (message) => {
         {
           name: '👋 !greet',
           value: `Manage greeting settings:
-- \`!greet\` → Set/remove greeting channel
+- \`!greet\` → Add/remove greeting channel
 - \`!greet set <message>\` → Set custom greeting
-- \`!greet reset\` → Reset greeting
+- \`!greet time <duration>\` → Set auto-delete time
+- \`!greet reset\` → Remove all channels
+- \`!greet clear\` → Reset everything
 - \`!greet test\` → Test greeting
 - \`!greet stats\` → Show current settings
 \nVariables: {mention}, {username}`
@@ -351,22 +394,31 @@ client.on('messageCreate', async (message) => {
 
     const subCommand = args[0];
 
-    // !greet → تعيين/إزالة روم الترحيب
+    // إنشاء إعدادات جديدة إذا لم تكن موجودة
+    if (!greetSettings[message.guild.id]) {
+      greetSettings[message.guild.id] = {
+        guild_id: message.guild.id,
+        channels: [],
+        message: 'Welcome {mention} 🎉',
+        delete_time: 0
+      };
+    }
+
+    // !greet → إضافة/إزالة قناة الترحيب
     if (!subCommand) {
-      const current = greetSettings[message.guild.id];
-      if (current && current.channel_id === message.channel.id) {
-        await supabase.from('greet_settings').delete().eq('guild_id', message.guild.id);
-        delete greetSettings[message.guild.id];
-        return message.reply('✅ Greeting channel removed');
+      const settings = greetSettings[message.guild.id];
+      const channelId = message.channel.id;
+      
+      if (settings.channels.includes(channelId)) {
+        // إزالة القناة
+        settings.channels = settings.channels.filter(id => id !== channelId);
+        await saveGreetSettings(message.guild.id);
+        return message.reply(`✅ Greeting channel ${message.channel} removed`);
       } else {
-        const newSettings = {
-          guild_id: message.guild.id,
-          channel_id: message.channel.id,
-          message: current?.message || 'Welcome {mention} 🎉'
-        };
-        await supabase.from('greet_settings').upsert(newSettings);
-        greetSettings[message.guild.id] = newSettings;
-        return message.reply(`✅ Greeting channel set to ${message.channel}`);
+        // إضافة القناة
+        settings.channels.push(channelId);
+        await saveGreetSettings(message.guild.id);
+        return message.reply(`✅ Greeting channel ${message.channel} added`);
       }
     }
 
@@ -375,53 +427,94 @@ client.on('messageCreate', async (message) => {
       const customMessage = args.slice(1).join(' ');
       if (!customMessage) return message.reply('❌ Usage: `!greet set <message>`');
 
-      if (!greetSettings[message.guild.id]) {
-        greetSettings[message.guild.id] = {
-          guild_id: message.guild.id,
-          channel_id: null,
-          message: customMessage
-        };
-      } else {
-        greetSettings[message.guild.id].message = customMessage;
-      }
-
-      await supabase.from('greet_settings').upsert(greetSettings[message.guild.id]);
+      greetSettings[message.guild.id].message = customMessage;
+      await saveGreetSettings(message.guild.id);
       return message.reply('✅ Greeting message updated!');
     }
 
-    // !greet reset
+    // !greet time <duration>
+    if (subCommand === 'time') {
+      const timeArg = args[1];
+      if (!timeArg) return message.reply('❌ Usage: `!greet time <duration>` (e.g., 5s, 10m, 1h)');
+
+      const timeMs = parseTime(timeArg);
+      if (timeMs === 0) return message.reply('❌ Invalid time! Use format like 5s, 10m, 1h, 1d');
+
+      greetSettings[message.guild.id].delete_time = timeMs;
+      await saveGreetSettings(message.guild.id);
+      return message.reply(`✅ Greeting messages will be deleted after ${formatTimeLeft(timeMs)}`);
+    }
+
+    // !greet reset → إزالة كل القنوات فقط
     if (subCommand === 'reset') {
+      greetSettings[message.guild.id].channels = [];
+      await saveGreetSettings(message.guild.id);
+      return message.reply('✅ All greeting channels removed');
+    }
+
+    // !greet clear → إعادة تعيين كل شيء
+    if (subCommand === 'clear') {
       await supabase.from('greet_settings').delete().eq('guild_id', message.guild.id);
       delete greetSettings[message.guild.id];
-      return message.reply('✅ Greeting reset (disabled)');
+      return message.reply('✅ All greeting settings cleared');
     }
 
     // !greet test
     if (subCommand === 'test') {
       const settings = greetSettings[message.guild.id];
-      if (!settings || !settings.channel_id || !settings.message) {
-        return message.reply('❌ Greeting is not set up');
+      if (!settings || !settings.channels || settings.channels.length === 0) {
+        return message.reply('❌ No greeting channels set up');
       }
-      const channel = message.guild.channels.cache.get(settings.channel_id);
-      if (!channel) return message.reply('❌ Greeting channel not found');
+      
       const testMessage = settings.message
         .replace(/{mention}/g, `<@${message.author.id}>`)
         .replace(/{username}/g, message.author.username);
-      channel.send(testMessage);
-      return message.reply('✅ Test greeting sent!');
+      
+      let sentCount = 0;
+      for (const channelId of settings.channels) {
+        const channel = message.guild.channels.cache.get(channelId);
+        if (channel) {
+          try {
+            const sentMessage = await channel.send(testMessage);
+            scheduleGreetMessageDeletion(sentMessage, settings.delete_time);
+            sentCount++;
+          } catch (error) {
+            console.error('Error sending test message:', error);
+          }
+        }
+      }
+      
+      return message.reply(`✅ Test greeting sent to ${sentCount} channel(s)!`);
     }
 
     // !greet stats
     if (subCommand === 'stats') {
       const settings = greetSettings[message.guild.id];
-      if (!settings) return message.reply('❌ No greeting settings found');
       const embed = new EmbedBuilder()
         .setTitle('👋 Greeting Settings')
-        .setColor('#00ff00')
-        .addFields(
-          { name: 'Channel', value: settings.channel_id ? `<#${settings.channel_id}>` : '❌ Not set' },
-          { name: 'Message', value: settings.message || '❌ Not set' }
-        );
+        .setColor('#00ff00');
+
+      if (!settings || !settings.channels || settings.channels.length === 0) {
+        embed.addFields({ name: 'Channels', value: 'No channels' });
+      } else {
+        const validChannels = settings.channels
+          .map(id => message.guild.channels.cache.get(id))
+          .filter(channel => channel)
+          .map(channel => `<#${channel.id}>`)
+          .join(', ') || 'No valid channels';
+        embed.addFields({ name: 'Channels', value: validChannels });
+      }
+
+      embed.addFields(
+        { name: 'Message', value: settings?.message || 'Welcome {mention} 🎉' },
+        { 
+          name: 'Delete Time', 
+          value: settings?.delete_time > 0 
+            ? formatTimeLeft(settings.delete_time) 
+            : 'No auto-delete' 
+        }
+      );
+
       return message.reply({ embeds: [embed] });
     }
   }
